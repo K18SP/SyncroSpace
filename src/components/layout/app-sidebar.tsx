@@ -95,20 +95,63 @@ export function AppSidebar() {
   const [allUsersSnapshot] = useCollection(allUsersQuery);
   const allUsers = allUsersSnapshot?.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) || [];
 
-  // Calculate active participants for each space
+  // Calculate active participants for each space and filter out inactive/ended spaces
   const spacesWithActiveParticipants = React.useMemo(() => {
-    return mergedSidebarSpaces.map(space => {
-      // Always filter out users who have this space in their hiddenMeetings array
-      // This ensures that users who left the meeting are not counted, regardless of meeting status
-      const activeParticipants = space.members?.filter((memberId: string) => {
-        const user = allUsers.find(u => u.uid === memberId);
-        const hiddenMeetings = user?.hiddenMeetings || [];
-        return !hiddenMeetings.includes(space.id);
-      }) || [];
-      
-      return { ...space, activeParticipantCount: activeParticipants.length };
-    });
-  }, [mergedSidebarSpaces, allUsers]);
+    return mergedSidebarSpaces
+      .map(space => {
+        // Always filter out users who have this space in their hiddenMeetings array
+        // This ensures that users who left the meeting are not counted, regardless of meeting status
+        const activeParticipants = space.members?.filter((memberId: string) => {
+          const user = allUsers.find(u => u.uid === memberId);
+          const hiddenMeetings = user?.hiddenMeetings || [];
+          return !hiddenMeetings.includes(space.id);
+        }) || [];
+        
+        return { ...space, activeParticipantCount: activeParticipants.length };
+      })
+      .filter(space => {
+        // Filter out spaces that are in the current user's hiddenMeetings
+        const userHiddenMeetings = (userData as any)?.hiddenMeetings || [];
+        if (userHiddenMeetings.includes(space.id)) {
+          return false;
+        }
+
+        // For meeting spaces, check if the meeting is still active
+        if (space.isMeeting || space.isMeetingSpace) {
+          // If it's a meeting space, check if it has activeMeeting true
+          if (!space.activeMeeting) {
+            return false;
+          }
+          
+          // Check if meeting has ended (meetingEndsAt is in the past)
+          if (space.meetingEndsAt) {
+            const now = new Date();
+            const meetingEndTime = space.meetingEndsAt.toDate ? space.meetingEndsAt.toDate() : new Date(space.meetingEndsAt);
+            if (meetingEndTime < now) {
+              return false;
+            }
+          }
+        }
+
+        // Filter out spaces with no active participants (everyone has left)
+        if (space.activeParticipantCount === 0) {
+          return false;
+        }
+
+        // Filter out spaces that haven't been active recently (older than 7 days)
+        if (space.lastActivity) {
+          const lastActivityDate = new Date(space.lastActivity);
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          
+          if (lastActivityDate < sevenDaysAgo && !space.activeMeeting) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+  }, [mergedSidebarSpaces, allUsers, userData]);
 
   // Debug sidebar space visibility
   React.useEffect(() => {

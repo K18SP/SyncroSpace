@@ -51,6 +51,9 @@ interface SpaceData {
   lastActivity?: string;
   createdAt?: string;
   isBookmarked?: boolean;
+  isMeeting?: boolean;
+  isMeetingSpace?: boolean;
+  meetingEndsAt?: any;
   rating?: number;
   location?: string;
   isRealSpace?: boolean;
@@ -364,23 +367,63 @@ export default function DashboardPage() {
   const realSpaces: SpaceData[] = Array.from(mergedById.values());
   const spacesToShow = realSpaces.length > 0 ? realSpaces : [];
 
-  const activeSpaces = spacesToShow.filter(space => {
-    const hasActiveMeeting = space.activeMeeting;
+  // Enhanced filtering function for spaces
+  const shouldShowSpace = (space: SpaceData) => {
     const isHiddenByUser = userHiddenMeetings.includes(space.id);
     const isAdmin = (userData as any)?.role === 'admin';
-    return hasActiveMeeting && (!isHiddenByUser || isAdmin);
+    
+    // Don't show if user has hidden it (unless admin)
+    if (isHiddenByUser && !isAdmin) {
+      return false;
+    }
+
+    // For meeting spaces, check if the meeting is still active
+    if (space.isMeeting || space.isMeetingSpace) {
+      // If it's a meeting space, check if it has activeMeeting true
+      if (!space.activeMeeting) {
+        return false;
+      }
+      
+      // Check if meeting has ended (meetingEndsAt is in the past)
+      if (space.meetingEndsAt) {
+        const now = new Date();
+        const meetingEndTime = space.meetingEndsAt.toDate ? space.meetingEndsAt.toDate() : new Date(space.meetingEndsAt);
+        if (meetingEndTime < now) {
+          return false;
+        }
+      }
+    }
+
+    // Filter out spaces that haven't been active recently (older than 7 days)
+    if (space.lastActivity) {
+      const lastActivityDate = new Date(space.lastActivity);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      if (lastActivityDate < sevenDaysAgo && !space.activeMeeting) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const activeSpaces = spacesToShow.filter(space => {
+    const hasActiveMeeting = space.activeMeeting;
+    return hasActiveMeeting && shouldShowSpace(space);
   });
 
   const recentSpaces = spacesToShow.filter(space => {
-    const isHiddenByUser = userHiddenMeetings.includes(space.id);
-    const isAdmin = (userData as any)?.role === 'admin';
-    return !isHiddenByUser || isAdmin;
+    return shouldShowSpace(space);
   }).slice(0, 4);
+
+  // Calculate filtered spaces for statistics
+  const filteredSpaces = spacesToShow.filter(space => shouldShowSpace(space));
 
   // Compute team member count as unique users who are currently not hiding the space
   const teamMemberIdSet = React.useMemo(() => {
     const set = new Set<string>();
-    spacesToShow.forEach(space => {
+    filteredSpaces.forEach(space => {
       const memberIds = (space as any).members || [];
       memberIds.forEach((memberId: string) => {
         const member = allUsers.find(u => u.uid === memberId);
@@ -391,7 +434,7 @@ export default function DashboardPage() {
       });
     });
     return set;
-  }, [spacesToShow, allUsers]);
+  }, [filteredSpaces, allUsers]);
   const teamMembersCount = teamMemberIdSet.size;
 
   // Debug: log query states when no spaces appear
@@ -616,7 +659,7 @@ export default function DashboardPage() {
               </span>{' '}
               and{' '}
               <span className="font-semibold text-purple-600 dark:text-purple-400">
-                {spacesToShow.length} total spaces
+                {filteredSpaces.length} total spaces
               </span>{' '}
               to explore.
             </p>
@@ -641,7 +684,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-blue-600 dark:text-blue-400 text-sm font-medium">Total Spaces</p>
-                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{spacesToShow.length}</p>
+                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{filteredSpaces.length}</p>
                 </div>
                 <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
                   <Users className="w-5 h-5 text-white" />

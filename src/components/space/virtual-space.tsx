@@ -16,6 +16,8 @@ import officeMapData from '@/../map.json';
 import { summarizeMeeting } from '@/ai/flows/summarize-meeting';
 import { useRouter } from 'next/navigation';
 import { createRoom, joinRoom, hangUp, startLocalMedia, RoomHandles } from '@/lib/webrtc';
+import { createMeshRoom, MeshRoomHandles } from '@/lib/webrtc-mesh';
+import { createSimpleRoom, SimpleRoomHandles } from '@/lib/webrtc-simple';
 
 const GRID_SIZE = 32;
 const STEP = GRID_SIZE;
@@ -82,8 +84,7 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
   const [liveParticipants, setLiveParticipants] = useState<Participant[]>(initialParticipants);
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
@@ -91,6 +92,8 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
   const [isRecording, setIsRecording] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const roomHandlesRef = useRef<RoomHandles | null>(null);
+  const meshHandlesRef = useRef<MeshRoomHandles | null>(null);
+  const simpleHandlesRef = useRef<SimpleRoomHandles | null>(null);
   // Holds a dummy (black) video track we may use to keep the sender alive while the real camera is off.
   const offVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const { toast } = useToast();
@@ -154,36 +157,101 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
   }, [toast]);
 
   const startOrJoinCall = async () => {
-    if (!localStream) {
-      toast({ variant: 'destructive', title: 'Media not ready' });
+    if (!localStream || !user) {
+      toast({ variant: 'destructive', title: 'Media not ready', description: 'Please ensure camera and microphone are enabled' });
       return;
     }
+    
+    const roomId = 'default';
+    console.log('Starting video call for space:', spaceId, 'user:', user.uid);
+    
     try {
-      const roomId = 'default';
-      const roomPath = doc(db, `spaces/${spaceId}/rooms/${roomId}`);
-      const snap = await getDoc(roomPath);
-      let handles: RoomHandles;
-      if (snap.exists()) {
-        handles = await joinRoom(spaceId, roomId, localStream);
-      } else {
-        handles = await createRoom(spaceId, roomId, localStream);
-      }
-      roomHandlesRef.current = handles;
-      setRemoteStream(handles.remoteStream);
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = handles.remoteStream;
+      // Try mesh implementation first
+      const meshHandles = await createMeshRoom(spaceId, roomId, localStream, user.uid);
+      meshHandlesRef.current = meshHandles;
+      
+      // Update remote streams when they change
+      const updateRemoteStreams = () => {
+        const streams = meshHandles.getRemoteStreams();
+        console.log('Remote streams updated:', streams.length);
+        setRemoteStreams(streams);
+      };
+      
+      // Initial update
+      updateRemoteStreams();
+      
+      // Set up periodic updates
+      const interval = setInterval(updateRemoteStreams, 2000);
+      (meshHandles as any).interval = interval;
+      
       setIsInCall(true);
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Call failed', description: e?.message || 'Unable to start call' });
+      toast({ 
+        title: 'Joined meeting', 
+        description: `Connected to meeting. ${meshHandles.getParticipantCount()} participants.` 
+      });
+    } catch (meshError) {
+      console.warn('Mesh implementation failed, trying simple implementation:', meshError);
+      
+      try {
+        // Fallback to simple implementation
+        const simpleHandles = await createSimpleRoom(spaceId, roomId, localStream, user.uid);
+        simpleHandlesRef.current = simpleHandles;
+        
+        // Update remote streams
+        const updateRemoteStreams = () => {
+          const streams = simpleHandles.getRemoteStreams();
+          console.log('Simple remote streams updated:', streams.length);
+          setRemoteStreams(streams);
+        };
+        
+        // Set up callback for stream changes
+        simpleHandles.setOnStreamsChanged(updateRemoteStreams);
+        
+        // Initial update
+        updateRemoteStreams();
+        
+        setIsInCall(true);
+        toast({ 
+          title: 'Joined meeting (Simple Mode)', 
+          description: `Connected to meeting. Note: Multi-participant video requires Firebase configuration.` 
+        });
+      } catch (simpleError) {
+        console.error('Both implementations failed:', simpleError);
+        toast({ 
+          variant: 'destructive', 
+          title: 'Call failed', 
+          description: 'Unable to start call. Please check your internet connection and Firebase configuration.' 
+        });
+      }
     }
   };
 
   const endCall = async () => {
     try {
-      if (roomHandlesRef.current) await hangUp(roomHandlesRef.current);
+      if (meshHandlesRef.current) {
+        // Clear interval
+        if ((meshHandlesRef.current as any).interval) {
+          clearInterval((meshHandlesRef.current as any).interval);
+        }
+        await meshHandlesRef.current.unsubscribe();
+        meshHandlesRef.current = null;
+      }
+      
+      if (simpleHandlesRef.current) {
+        await simpleHandlesRef.current.unsubscribe();
+        simpleHandlesRef.current = null;
+      }
+      
+      if (roomHandlesRef.current) {
+        await hangUp(roomHandlesRef.current);
+        roomHandlesRef.current = null;
+      }
+      
       setIsInCall(false);
-      setRemoteStream(null);
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-    } catch {}
+      setRemoteStreams([]);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'Failed to end call' });
+    }
   };
   
   const updatePositionInDb = async (newPos: {x: number, y: number}) => {
@@ -457,19 +525,67 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm p-8">
                     <h2 className="text-2xl font-bold mb-8">Together Mode</h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                        {liveParticipants.map(p => (
-                            <Card key={p.uid} className="overflow-hidden shadow-lg">
-                                <CardContent className="p-0 aspect-video flex items-center justify-center bg-muted">
-                                <UiAvatar className="h-24 w-24 border-4 border-background">
-                                    <AvatarImage src={p.photoURL} alt={p.name} />
-                                    <AvatarFallback>{p.name?.charAt(0).toUpperCase()}</AvatarFallback>
-                                </UiAvatar>
+                        {/* Local participant */}
+                        <Card className="overflow-hidden shadow-lg">
+                            <CardContent className="p-0 aspect-video flex items-center justify-center bg-muted relative">
+                                {localStream ? (
+                                    <video 
+                                        ref={videoRef}
+                                        className="w-full h-full object-cover" 
+                                        autoPlay 
+                                        muted 
+                                    />
+                                ) : (
+                                    <UiAvatar className="h-24 w-24 border-4 border-background">
+                                        <AvatarImage src={user?.photoURL || ''} alt={user?.displayName || 'You'} />
+                                        <AvatarFallback>{user?.displayName?.charAt(0).toUpperCase() || 'Y'}</AvatarFallback>
+                                    </UiAvatar>
+                                )}
+                                {(isCameraOff || hasCameraPermission === false) && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                                        <VideoOff className="h-8 w-8 text-white" />
+                                    </div>
+                                )}
+                            </CardContent>
+                            <div className="p-2 text-center text-sm font-medium bg-background/80">
+                                You
+                            </div>
+                        </Card>
+                        
+                        {/* Remote participants */}
+                        {remoteStreams.map((stream, index) => (
+                            <Card key={index} className="overflow-hidden shadow-lg">
+                                <CardContent className="p-0 aspect-video flex items-center justify-center bg-muted relative">
+                                    <video 
+                                        className="w-full h-full object-cover" 
+                                        autoPlay 
+                                        ref={(videoElement) => {
+                                          if (videoElement) {
+                                            videoElement.srcObject = stream;
+                                          }
+                                        }}
+                                    />
                                 </CardContent>
                                 <div className="p-2 text-center text-sm font-medium bg-background/80">
-                                    {p.name}
+                                    Participant {index + 1}
                                 </div>
                             </Card>
                         ))}
+                        
+                        {/* Show placeholder for empty slots */}
+                        {remoteStreams.length === 0 && (
+                            <Card className="overflow-hidden shadow-lg">
+                                <CardContent className="p-0 aspect-video flex items-center justify-center bg-muted">
+                                    <div className="flex flex-col items-center">
+                                        <Users className="h-8 w-8 text-muted-foreground" />
+                                        <span className="mt-2 text-sm text-muted-foreground">Waiting for others…</span>
+                                    </div>
+                                </CardContent>
+                                <div className="p-2 text-center text-sm font-medium bg-background/80">
+                                    Waiting...
+                                </div>
+                            </Card>
+                        )}
                     </div>
                 </div>
             ) : (
@@ -499,7 +615,8 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
 
         <div className="absolute bottom-0 left-0 right-0 p-4 flex flex-col items-center">
             
-            <div className="flex gap-4 mb-4">
+            <div className="flex flex-wrap gap-4 mb-4 justify-center max-w-4xl">
+              {/* Local video */}
               <div className={cn(
                   "relative w-48 h-36 transition-all duration-300",
                   isTogetherMode && "w-0 h-0 opacity-0"
@@ -516,23 +633,41 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
                           <span className="mt-2 text-sm text-muted-foreground">Camera is off</span>
                       </div>
                   )}
+                  <div className="absolute bottom-1 left-1 bg-black/50 text-white text-xs px-2 py-1 rounded">
+                      You
+                  </div>
               </div>
-              <div className={cn(
-                  "relative w-48 h-36 transition-all duration-300",
-                  isTogetherMode && "w-0 h-0 opacity-0"
-              )}>
-                  <video 
-                      ref={remoteVideoRef} 
-                      className="w-full h-full rounded-md bg-background object-cover" 
-                      autoPlay 
-                  />
-                  {!remoteStream && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-background rounded-md border">
-                          <Users className="h-8 w-8 text-muted-foreground" />
-                          <span className="mt-2 text-sm text-muted-foreground">Waiting for others…</span>
-                      </div>
-                  )}
-              </div>
+              
+              {/* Remote videos */}
+              {remoteStreams.map((stream, index) => (
+                <div key={index} className={cn(
+                    "relative w-48 h-36 transition-all duration-300",
+                    isTogetherMode && "w-0 h-0 opacity-0"
+                )}>
+                    <video 
+                        className="w-full h-full rounded-md bg-background object-cover" 
+                        autoPlay 
+                        ref={(videoElement) => {
+                          if (videoElement) {
+                            videoElement.srcObject = stream;
+                          }
+                        }}
+                    />
+                    <div className="absolute bottom-1 left-1 bg-black/50 text-white text-xs px-2 py-1 rounded">
+                        Participant {index + 1}
+                    </div>
+                </div>
+              ))}
+              
+              {/* Show waiting message when no remote streams */}
+              {remoteStreams.length === 0 && !isTogetherMode && (
+                <div className="relative w-48 h-36 flex items-center justify-center bg-background rounded-md border">
+                    <div className="flex flex-col items-center">
+                        <Users className="h-8 w-8 text-muted-foreground" />
+                        <span className="mt-2 text-sm text-muted-foreground">Waiting for others…</span>
+                    </div>
+                </div>
+              )}
             </div>
 
              { hasCameraPermission === false && (

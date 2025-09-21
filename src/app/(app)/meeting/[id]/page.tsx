@@ -6,13 +6,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Clock, Users, Calendar, MapPin, Video, ArrowLeft } from 'lucide-react';
+import { Clock, Users, Calendar, MapPin, Video, ArrowLeft, Shield, Trash2, UserMinus } from 'lucide-react';
 import { useDocumentData } from 'react-firebase-hooks/firestore';
 import { doc } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import Link from 'next/link';
 import { getInitials } from '@/lib/utils';
+import { AdminMeetingClientSimpleService } from '@/lib/admin-meeting-client-simple';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface MeetingData {
   id: string;
@@ -32,6 +47,9 @@ export default function MeetingPage() {
   const meetingId = params.id as string;
   const [user] = useAuthState(auth);
   const [isJoining, setIsJoining] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminReason, setAdminReason] = useState('');
+  const { toast } = useToast();
   
   const meetingDocRef = doc(db, 'meetings', meetingId);
   const [meetingData, meetingLoading, meetingError] = useDocumentData(meetingDocRef);
@@ -39,6 +57,17 @@ export default function MeetingPage() {
   const isUserInvited = user?.email && meetingData?.attendees?.includes(user.email);
   const isCreator = user?.uid === meetingData?.creatorId;
   const canJoin = isUserInvited || isCreator;
+
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (user) {
+        const adminStatus = await AdminMeetingClientSimpleService.isCurrentUserAdmin();
+        setIsAdmin(adminStatus);
+      }
+    };
+    checkAdminStatus();
+  }, [user]);
 
   const startTime = meetingData ? new Date(meetingData.startDateTime) : null;
   const endTime = meetingData ? new Date(meetingData.endDateTime) : null;
@@ -89,6 +118,109 @@ export default function MeetingPage() {
       console.error('Error joining meeting:', error);
     } finally {
       setIsJoining(false);
+    }
+  };
+
+  // Admin control functions
+  const handleEndMeetingForAll = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await AdminMeetingClientSimpleService.endMeetingForAllUsers(
+        meetingId,
+        user.uid,
+        user.displayName || user.email || 'Admin',
+        adminReason || 'Meeting ended by admin'
+      );
+      
+      if (result.success) {
+        toast({
+          title: "Meeting Ended",
+          description: result.message,
+        });
+        setAdminReason('');
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to end meeting",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteMeeting = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await AdminMeetingClientSimpleService.deleteMeetingCompletely(
+        meetingId,
+        user.uid,
+        user.displayName || user.email || 'Admin',
+        adminReason || 'Meeting deleted by admin'
+      );
+      
+      if (result.success) {
+        toast({
+          title: "Meeting Deleted",
+          description: result.message,
+        });
+        setAdminReason('');
+        // Redirect to dashboard after deletion
+        window.location.href = '/dashboard';
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete meeting",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRemoveAttendee = async (attendeeEmail: string) => {
+    if (!user) return;
+    
+    try {
+      const result = await AdminMeetingClientSimpleService.removeAttendeeFromMeeting(
+        meetingId,
+        attendeeEmail,
+        user.uid,
+        user.displayName || user.email || 'Admin',
+        adminReason || 'Attendee removed by admin'
+      );
+      
+      if (result.success) {
+        toast({
+          title: "Attendee Removed",
+          description: result.message,
+        });
+        setAdminReason('');
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove attendee",
+        variant: "destructive",
+      });
     }
   };
 
@@ -220,6 +352,46 @@ export default function MeetingPage() {
                         </AvatarFallback>
                       </Avatar>
                       <span className="text-sm text-gray-600">{email}</span>
+                      {isAdmin && (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                            >
+                              <UserMinus className="h-3 w-3" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Remove Attendee</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Are you sure you want to remove {email} from this meeting? 
+                                This will remove the meeting from their dashboard.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <div className="space-y-2">
+                              <Label htmlFor="admin-reason">Reason (optional)</Label>
+                              <Input
+                                id="admin-reason"
+                                value={adminReason}
+                                onChange={(e) => setAdminReason(e.target.value)}
+                                placeholder="Enter reason for removal..."
+                              />
+                            </div>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleRemoveAttendee(email)}
+                                className="bg-red-600 hover:bg-red-700"
+                              >
+                                Remove Attendee
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -237,6 +409,82 @@ export default function MeetingPage() {
                   <Video className="mr-2 h-4 w-4" />
                   {isJoining ? 'Joining...' : isMeetingActive ? 'Join Meeting' : 'Join When Ready'}
                 </Button>
+              </div>
+            )}
+
+            {/* Admin Controls */}
+            {isAdmin && (
+              <div className="pt-4 border-t">
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield className="h-4 w-4 text-blue-600" />
+                  <h4 className="text-sm font-medium text-gray-900">Admin Controls</h4>
+                </div>
+                <div className="space-y-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-reason-main">Reason for action (optional)</Label>
+                    <Input
+                      id="admin-reason-main"
+                      value={adminReason}
+                      onChange={(e) => setAdminReason(e.target.value)}
+                      placeholder="Enter reason for admin action..."
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm" className="flex-1">
+                          <Clock className="mr-2 h-4 w-4" />
+                          End Meeting
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>End Meeting for All</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will end the meeting for all attendees and remove it from their dashboards. 
+                            This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={handleEndMeetingForAll}
+                            className="bg-red-600 hover:bg-red-700"
+                          >
+                            End Meeting
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm" className="flex-1">
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete Meeting
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete Meeting Completely</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete the meeting and remove it from all users' dashboards. 
+                            This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={handleDeleteMeeting}
+                            className="bg-red-600 hover:bg-red-700"
+                          >
+                            Delete Meeting
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>

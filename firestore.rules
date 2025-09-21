@@ -92,10 +92,28 @@ service cloud.firestore {
         request.auth.uid == userId;
     }
 
-    // Meetings: attendees can read, creators can update/delete, admins can delete any
+    // Meetings: attendees can read, creators can update/delete, admins can manage any
     match /meetings/{meetingId} {
-      allow read, write, list: if isSignedIn() || isDevelopment();
-      allow create, delete: if isSignedIn() || isDevelopment();
+      // Anyone can read meetings if they're invited or if it's development
+      allow read: if isSignedIn() || isDevelopment();
+      
+      // Creators can update their own meetings
+      allow update: if isSignedIn() && resource.data.creatorId == request.auth.uid;
+      
+      // Admins can update any meeting
+      allow update: if isAdmin();
+      
+      // Creators can delete their own meetings
+      allow delete: if isSignedIn() && resource.data.creatorId == request.auth.uid;
+      
+      // Admins can delete any meeting
+      allow delete: if isAdmin();
+      
+      // Anyone can create meetings in development, authenticated users in production
+      allow create: if isSignedIn() || isDevelopment();
+      
+      // List permissions for development
+      allow list: if isDevelopment();
     }
 
   }

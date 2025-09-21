@@ -2,6 +2,16 @@ import { collection, query, where, getDocs, updateDoc, doc, serverTimestamp, del
 import { db } from './firebase';
 import { sendEmailNotification, createMeetingReminderEmail, createMeetingInvitationEmail } from './email';
 
+export interface AdminMeetingAction {
+  action: 'end_meeting' | 'delete_meeting' | 'remove_attendee';
+  meetingId: string;
+  adminId: string;
+  adminName: string;
+  timestamp: any;
+  affectedUsers?: string[];
+  reason?: string;
+}
+
 export interface MeetingData {
   id: string;
   title: string;
@@ -11,9 +21,15 @@ export interface MeetingData {
   attendees: string[];
   creatorId: string;
   creatorName: string;
-  status: string;
+  status: 'scheduled' | 'active' | 'ended' | 'cancelled' | 'deleted';
   remindersSent?: boolean;
   spaceId?: string;
+  endedBy?: string;
+  endedAt?: any;
+  deletedBy?: string;
+  deletedAt?: any;
+  adminActions?: AdminMeetingAction[];
+  lastUpdated?: any;
 }
 
 // Check for meetings that need 10-minute reminders
