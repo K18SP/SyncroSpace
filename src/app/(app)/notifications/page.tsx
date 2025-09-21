@@ -51,7 +51,8 @@ export default function NotificationsPage() {
                             </div>
                         )}
                         {!loading && notificationsSnapshot?.docs.map(doc => {
-                            const notification = { id: doc.id, ...doc.data() };
+                            type Notification = { id: string; link?: string; read?: boolean; title?: string; body?: string; createdAt?: any };
+                            const notification = { id: doc.id, ...(doc.data() as any) } as Notification;
                             return (
                                 <Link 
                                     href={notification.link || '#'} 

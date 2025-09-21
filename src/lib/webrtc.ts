@@ -116,6 +116,27 @@ export async function hangUp(handles: RoomHandles) {
   try {
     handles.unsubscribeCandidates && handles.unsubscribeCandidates();
   } catch {}
+  // Clean up room document and ICE candidates to avoid leaks
+  try {
+    if (handles.roomRef) {
+      const callerCandidatesRef = handles.callerCandidatesRef;
+      const calleeCandidatesRef = handles.calleeCandidatesRef;
+      if (callerCandidatesRef) {
+        // Firestore delete of subcollection docs requires listing
+        const snap = await (await import('firebase/firestore')).getDocs(callerCandidatesRef);
+        const batch = (await import('firebase/firestore')).writeBatch(db);
+        snap.forEach(docSnap => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
+      if (calleeCandidatesRef) {
+        const snap = await (await import('firebase/firestore')).getDocs(calleeCandidatesRef);
+        const batch = (await import('firebase/firestore')).writeBatch(db);
+        snap.forEach(docSnap => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
+      await deleteDoc(handles.roomRef);
+    }
+  } catch {}
 }
 
 

@@ -3,6 +3,7 @@ import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, FacebookAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
@@ -48,8 +49,9 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+const rtdb = getDatabase(app);
 
 const googleProvider = new GoogleAuthProvider();
 const facebookProvider = new FacebookAuthProvider();
 
-export { app, auth, db, storage, googleProvider, facebookProvider };
+export { app, auth, db, storage, rtdb, googleProvider, facebookProvider };

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Wand2, Sparkles } from 'lucide-react';
 import { generateAvatar } from '@/ai/flows/generate-avatar';
+import { uploadFile } from '@/lib/firebase-upload';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { Skeleton } from '../ui/skeleton';
@@ -26,6 +27,7 @@ export function GenerateAvatarDialog({ onAvatarGenerated }: { onAvatarGenerated:
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [generatedAvatar, setGeneratedAvatar] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const handleGenerate = async () => {
@@ -46,10 +48,29 @@ export function GenerateAvatarDialog({ onAvatarGenerated }: { onAvatarGenerated:
     }
   };
   
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsLoading(true);
+    setGeneratedAvatar(null);
+    try {
+      const url = await uploadFile(file, 'avatars');
+      setGeneratedAvatar(url);
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Avatar Upload Failed',
+        description: error.message || 'Please try again.',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleUseAvatar = () => {
     if (generatedAvatar) {
-        onAvatarGenerated(generatedAvatar);
-        setOpen(false);
+      onAvatarGenerated(generatedAvatar);
+      setOpen(false);
     }
   }
 
@@ -79,7 +100,22 @@ export function GenerateAvatarDialog({ onAvatarGenerated }: { onAvatarGenerated:
                         onChange={(e) => setPrompt(e.target.value)}
                         disabled={isLoading}
                     />
-                     <Button onClick={handleGenerate} disabled={isLoading || !prompt}>
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLoading}
+                    >
+                      Upload Image
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={handleFileUpload}
+                    />
+                    <Button onClick={handleGenerate} disabled={isLoading || !prompt}>
                         <Sparkles className="mr-2 h-4 w-4" />
                         {isLoading ? 'Generating...' : 'Generate'}
                     </Button>

@@ -341,6 +341,59 @@ export default function DashboardPage() {
     : null;
   const [invitedSpacesSnap] = useCollection(invitedSpacesQuery);
 
+  // All users snapshot for team member counts (unconditional hook call)
+  const [allUsersSnap] = useCollection(collection(db, 'users'));
+  const allUsers = allUsersSnap?.docs.map(d => ({ uid: d.id, ...(d.data() as any) })) || [];
+
+  // Process spaces and users before any early returns to keep hook order stable
+  const memberSpaces: SpaceData[] = allSpaces?.docs?.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    isRealSpace: true
+  } as SpaceData)) || [];
+
+  const invitedSpaces: SpaceData[] = invitedSpacesSnap?.docs?.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    isRealSpace: true
+  } as SpaceData)) || [];
+
+  const mergedById = new Map<string, SpaceData>();
+  memberSpaces.forEach(s => mergedById.set(s.id, s));
+  invitedSpaces.forEach(s => mergedById.set(s.id, s));
+  const realSpaces: SpaceData[] = Array.from(mergedById.values());
+  const spacesToShow = realSpaces.length > 0 ? realSpaces : [];
+
+  const activeSpaces = spacesToShow.filter(space => {
+    const hasActiveMeeting = space.activeMeeting;
+    const isHiddenByUser = userHiddenMeetings.includes(space.id);
+    const isAdmin = (userData as any)?.role === 'admin';
+    return hasActiveMeeting && (!isHiddenByUser || isAdmin);
+  });
+
+  const recentSpaces = spacesToShow.filter(space => {
+    const isHiddenByUser = userHiddenMeetings.includes(space.id);
+    const isAdmin = (userData as any)?.role === 'admin';
+    return !isHiddenByUser || isAdmin;
+  }).slice(0, 4);
+
+  // Compute team member count as unique users who are currently not hiding the space
+  const teamMemberIdSet = React.useMemo(() => {
+    const set = new Set<string>();
+    spacesToShow.forEach(space => {
+      const memberIds = (space as any).members || [];
+      memberIds.forEach((memberId: string) => {
+        const member = allUsers.find(u => u.uid === memberId);
+        const hiddenMeetings: string[] = member?.hiddenMeetings || [];
+        if (!hiddenMeetings.includes((space as any).id)) {
+          set.add(memberId);
+        }
+      });
+    });
+    return set;
+  }, [spacesToShow, allUsers]);
+  const teamMembersCount = teamMemberIdSet.size;
+
   // Debug: log query states when no spaces appear
   React.useEffect(() => {
     if (!user) return;
@@ -440,71 +493,6 @@ export default function DashboardPage() {
     const diffInDays = Math.floor(diffInHours / 24);
     return `${diffInDays}d ago`;
   };
-
-  // Process real spaces from Firestore (already filtered by membership)
-  const memberSpaces: SpaceData[] = allSpaces?.docs?.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    isRealSpace: true
-  } as SpaceData)) || [];
-
-  // Process invited spaces (may not yet include the user as a member)
-  const invitedSpaces: SpaceData[] = invitedSpacesSnap?.docs?.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    isRealSpace: true
-  } as SpaceData)) || [];
-
-  // Merge spaces by id to avoid duplicates
-  const mergedById = new Map<string, SpaceData>();
-  memberSpaces.forEach(s => mergedById.set(s.id, s));
-  invitedSpaces.forEach(s => mergedById.set(s.id, s));
-  const realSpaces: SpaceData[] = Array.from(mergedById.values());
-
-  // Use real spaces if available, otherwise show empty state
-  const spacesToShow = realSpaces.length > 0 ? realSpaces : [];
-
-  // Filter active spaces: exclude those hidden by the current user (unless they're admin)
-  const activeSpaces = spacesToShow.filter(space => {
-    const hasActiveMeeting = space.activeMeeting;
-    const isHiddenByUser = userHiddenMeetings.includes(space.id);
-    const isAdmin = (userData as any)?.role === 'admin';
-    
-    // Show if active AND (not hidden by user OR user is admin)
-    return hasActiveMeeting && (!isHiddenByUser || isAdmin);
-  });
-
-  // Filter recent spaces: exclude those hidden by the current user (unless they're admin)
-  // Only show spaces that are either active or recently ended (not hidden by user)
-  const recentSpaces = spacesToShow.filter(space => {
-    const isHiddenByUser = userHiddenMeetings.includes(space.id);
-    const isAdmin = (userData as any)?.role === 'admin';
-    
-    // Show if not hidden by user OR user is admin
-    return !isHiddenByUser || isAdmin;
-  }).slice(0, 4);
-
-  // Compute team member count as unique users who are currently not hiding the space
-  // This avoids counting users who have left a meeting/space session.
-  const [allUsersSnap] = useCollection(collection(db, 'users'));
-  const allUsers = allUsersSnap?.docs.map(d => ({ uid: d.id, ...(d.data() as any) })) || [];
-
-  const teamMemberIdSet = React.useMemo(() => {
-    const set = new Set<string>();
-    spacesToShow.forEach(space => {
-      const memberIds = (space as any).members || [];
-      memberIds.forEach((memberId: string) => {
-        const member = allUsers.find(u => u.uid === memberId);
-        const hiddenMeetings: string[] = member?.hiddenMeetings || [];
-        if (!hiddenMeetings.includes((space as any).id)) {
-          set.add(memberId);
-        }
-      });
-    });
-    return set;
-  }, [spacesToShow, allUsers]);
-
-  const teamMembersCount = teamMemberIdSet.size;
 
   // Helper function to check if a space is hidden for the current user
   const isSpaceHiddenForUser = (spaceId: string) => {

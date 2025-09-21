@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
     } else {
       return NextResponse.json({
         success: false,
-        error: result.error || 'Failed to generate user engagement forecast'
+        error: 'Failed to generate user engagement forecast'
       }, { status: 500 });
     }
   } catch (error) {

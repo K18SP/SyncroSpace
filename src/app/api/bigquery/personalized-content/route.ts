@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     } else {
       return NextResponse.json({
         success: false,
-        error: result.error || 'Failed to generate personalized content'
+        error: 'Failed to generate personalized content'
       }, { status: 500 });
     }
   } catch (error) {
@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
     } else {
       return NextResponse.json({
         success: false,
-        error: result.error
+        error: 'Failed to generate executive insights'
       }, { status: 500 });
     }
   } catch (error) {

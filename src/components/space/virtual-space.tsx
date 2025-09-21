@@ -29,6 +29,7 @@ interface Participant {
     status?: string;
     x?: number;
     y?: number;
+  hiddenMeetings?: string[];
 }
 
 const isPositionValid = (pos: { x: number; y: number }) => {
@@ -39,21 +40,30 @@ const isPositionValid = (pos: { x: number; y: number }) => {
     const tileX = Math.floor(avatarCenterX / GRID_SIZE);
     const tileY = Math.floor(avatarCenterY / GRID_SIZE);
 
-    for (const layer of officeMapData.layers) {
-        // Use a dedicated collision layer, e.g., named 'Tile Layer 8'
-        if (layer.type === 'tilelayer' && layer.name === 'Tile Layer 8') { 
-            if (tileX < 0 || tileY < 0 || tileX >= layer.width || tileY >= layer.height) {
-                return false;
-            }
-            const tileIndex = tileY * layer.width + tileX;
-            if (tileIndex >= 0 && tileIndex < layer.data.length) {
-                const tileGid = layer.data[tileIndex];
-                if (tileGid !== 0) {
-                    return false; // Collision detected
-                }
-            }
+  for (const layer of officeMapData.layers) {
+    // Use a dedicated collision layer, e.g., named 'Tile Layer 8'
+    if (
+      layer.type === 'tilelayer' &&
+      layer.name === 'Tile Layer 8' &&
+      typeof layer.width === 'number' &&
+      typeof layer.height === 'number' &&
+      Array.isArray((layer as any).data)
+    ) {
+      const data = (layer as any).data as number[];
+      const width = layer.width as number;
+      const height = layer.height as number;
+      if (tileX < 0 || tileY < 0 || tileX >= width || tileY >= height) {
+        return false;
+      }
+      const tileIndex = tileY * width + tileX;
+      if (tileIndex >= 0 && tileIndex < data.length) {
+        const tileGid = data[tileIndex];
+        if (tileGid !== 0) {
+          return false; // Collision detected
         }
+      }
     }
+  }
     return true; // No collision
 };
 
@@ -81,6 +91,8 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
   const [isRecording, setIsRecording] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const roomHandlesRef = useRef<RoomHandles | null>(null);
+  // Holds a dummy (black) video track we may use to keep the sender alive while the real camera is off.
+  const offVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const { toast } = useToast();
   
   useEffect(() => {
@@ -281,13 +293,98 @@ export function VirtualSpace({ participants: initialParticipants, spaceId }: { p
     }
   };
 
-  const handleToggleCamera = () => {
-    if (localStream) {
-        const videoTrack = localStream.getVideoTracks()[0];
-        if (videoTrack) {
-            videoTrack.enabled = !videoTrack.enabled;
-            setIsCameraOff(!videoTrack.enabled);
+  const handleToggleCamera = async () => {
+    if (!localStream) return;
+    const pc = roomHandlesRef.current?.peerConnection;
+
+  const currentVideoTracks = localStream.getVideoTracks();
+  const videoSenders = pc?.getSenders().filter(s => s.track && s.track.kind === 'video') || [];
+
+    if (!isCameraOff) {
+      // Turn camera OFF: stop and remove video tracks to release hardware
+      currentVideoTracks.forEach(track => {
+        try { track.stop(); } catch {}
+        localStream.removeTrack(track);
+      });
+      // Replace outgoing sender track with a dummy black canvas track to avoid renegotiation
+      if (videoSenders.length > 0) {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 640; canvas.height = 360;
+          const ctx = canvas.getContext('2d');
+          if (ctx) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+          const dummyStream = (canvas as HTMLCanvasElement).captureStream?.(5) as MediaStream | undefined;
+          const dummyTrack = dummyStream?.getVideoTracks()[0] || null;
+          if (dummyTrack) {
+            offVideoTrackRef.current = dummyTrack;
+            for (const sender of videoSenders) {
+              try { await sender.replaceTrack(dummyTrack); } catch {}
+            }
+            // Keep transceivers in sendrecv so the pipeline stays stable
+            pc?.getTransceivers()?.forEach(tx => {
+              const setDir = (tx as any).setDirection?.bind(tx);
+              if (tx.receiver?.track?.kind === 'video' || tx.sender?.track?.kind === 'video') {
+                try { setDir ? setDir('sendrecv') : (tx as any).direction = 'sendrecv'; } catch {}
+              }
+            });
+          } else {
+            // Fallback: if we couldn't create a dummy track, just stop sending
+            for (const sender of videoSenders) {
+              try { await sender.replaceTrack(null); } catch {}
+            }
+            pc?.getTransceivers()?.forEach(tx => {
+              const setDir = (tx as any).setDirection?.bind(tx);
+              if (tx.receiver?.track?.kind === 'video' || tx.sender?.track?.kind === 'video') {
+                try { setDir ? setDir('recvonly') : (tx as any).direction = 'recvonly'; } catch {}
+              }
+            });
+          }
+        } catch {}
+      }
+      // Update local preview
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      setIsCameraOff(true);
+      return;
+    }
+
+    // Turn camera ON: reacquire and attach a new video track
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) {
+        throw new Error('No video track available');
+      }
+      // Attach to local stream
+      localStream.addTrack(newVideoTrack);
+      setLocalStream(localStream);
+      if (videoRef.current) videoRef.current.srcObject = localStream;
+      // Send to remote peer
+      if (pc) {
+        const existingVideoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (existingVideoSender) {
+          await existingVideoSender.replaceTrack(newVideoTrack);
+        } else {
+          try { pc.addTrack(newVideoTrack, localStream); } catch {}
         }
+        // Ensure transceivers are set to sendrecv
+        pc.getTransceivers()?.forEach(tx => {
+          const setDir = (tx as any).setDirection?.bind(tx);
+          if (tx.receiver?.track?.kind === 'video' || tx.sender?.track?.kind === 'video') {
+            try { setDir ? setDir('sendrecv') : (tx as any).direction = 'sendrecv'; } catch {}
+          }
+        });
+        // Stop and clear any previously installed dummy track
+        if (offVideoTrackRef.current) {
+          try { offVideoTrackRef.current.stop(); } catch {}
+          offVideoTrackRef.current = null;
+        }
+      }
+      setIsCameraOff(false);
+    } catch (e) {
+      console.error('Failed to re-enable camera:', e);
+      toast({ variant: 'destructive', title: 'Camera error', description: 'Could not access camera. Check permissions.' });
     }
   }
 

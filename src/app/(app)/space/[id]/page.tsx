@@ -6,15 +6,15 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ChatPanel } from '@/components/space/chat-panel';
 import { Hash, Users, UserPlus } from 'lucide-react';
 import { useDocument, useCollection } from 'react-firebase-hooks/firestore';
-import { doc, collection, query, where, updateDoc, serverTimestamp, Timestamp, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, collection, query, where, updateDoc, serverTimestamp, Timestamp, getDoc, getDocs, deleteDoc, arrayUnion } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InviteDialog } from '@/components/space/invite-dialog';
 import { Button } from '@/components/ui/button';
 
-export default function SpacePage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function SpacePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = React.use(params);
   const [user] = useAuthState(auth);
   const spaceRef = doc(db, 'spaces', id);
   const [spaceSnapshot, spaceLoading, spaceError] = useDocument(spaceRef);
@@ -22,6 +22,7 @@ export default function SpacePage({ params }: { params: { id: string } }) {
   const spaceData = spaceSnapshot?.data();
   const memberIds = spaceData?.members || [];
   const isAdmin = !!user && user.uid === spaceData?.creatorId;
+  const isMember = !!user && memberIds.includes(user.uid);
 
   // Fetch all users who are members of this space
   const usersRef = collection(db, 'users');
@@ -44,6 +45,16 @@ export default function SpacePage({ params }: { params: { id: string } }) {
   }, [allMembers, id]);
   
   const loading = spaceLoading || (memberIds.length > 0 && usersLoading);
+  
+  // Explicit join action for non-members
+  const joinSpace = React.useCallback(async () => {
+    try {
+      if (!user || !spaceSnapshot?.exists()) return;
+      await updateDoc(spaceRef, { members: arrayUnion(user.uid) });
+    } catch (e) {
+      console.error('Failed to join space:', e);
+    }
+  }, [user, spaceSnapshot, spaceRef]);
   
   // Helpers to start/end meeting
   const endMeeting = React.useCallback(async () => {
@@ -194,6 +205,11 @@ export default function SpacePage({ params }: { params: { id: string } }) {
                         Invite
                     </Button>
                 </InviteDialog>
+                {!isMember && !!user && (
+                  <Button variant="default" size="sm" className="ml-2" onClick={joinSpace}>
+                    Join Space
+                  </Button>
+                )}
                 {isAdmin && (
                   <Button variant="destructive" size="sm" className="ml-2" onClick={endMeeting}>
                     End Meeting
@@ -240,7 +256,8 @@ export default function SpacePage({ params }: { params: { id: string } }) {
         <ChatPanel 
             participants={activeParticipants} 
             spaceId={id}
-            spaceName={spaceData?.name || ''} 
+            spaceName={spaceData?.name || ''}
+            canRead={isAdmin || isMember}
         />
       </div>
     </div>

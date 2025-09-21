@@ -28,8 +28,13 @@ interface UserEngagementChartProps {
   usersData?: any[];
 }
 
+export interface UserEngagementDay {
+  date: string;
+  users: number;
+}
+
 export function UserEngagementChart({ usersData }: UserEngagementChartProps) {
-  const [chartData, setChartData] = useState([]);
+  const [chartData, setChartData] = useState<UserEngagementDay[]>(() => []);
 
   useEffect(() => {
     if (!usersData) return;

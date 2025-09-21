@@ -1,4 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+type Meeting = {
+  id: string;
+  durationMinutes?: number;
+  attendees?: string[];
+  actionItems?: any[];
+  type?: string;
+  agenda?: any[];
+  title?: string;
+};
 import { BigQueryAI } from '@/lib/bigquery';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
@@ -28,7 +38,8 @@ export async function GET(request: NextRequest) {
           error: 'Meeting not found'
         }, { status: 404 });
       }
-      meetingData = { id: meetingDoc.id, ...meetingDoc.data() };
+  const { id: _, ...meetingFields } = meetingDoc.data() as Meeting;
+  meetingData = { id: meetingDoc.id, ...meetingFields };
     } else {
       // Fetch meetings from space
       const meetingsSnapshot = await getDocs(query(
@@ -36,15 +47,18 @@ export async function GET(request: NextRequest) {
         where('spaceId', '==', spaceId)
       ));
       
-      meetingData = meetingsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      meetingData = meetingsSnapshot.docs.map(doc => {
+        const { id: _discard, ...meetingFields } = doc.data() as Meeting;
+        return {
+          id: doc.id,
+          ...meetingFields
+        };
+      });
     }
 
     const results = [];
     
-    for (const meeting of Array.isArray(meetingData) ? meetingData : [meetingData]) {
+  for (const meeting of Array.isArray(meetingData) ? (meetingData as Meeting[]) : [meetingData as Meeting]) {
       // Score meeting effectiveness
       const effectivenessResult = await BigQueryAI.scoreMeetingEffectiveness({
         duration_minutes: meeting.durationMinutes || 30,
@@ -112,7 +126,8 @@ export async function POST(request: NextRequest) {
       const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
       if (!meetingDoc.exists()) continue;
       
-      const meeting = { id: meetingDoc.id, ...meetingDoc.data() };
+      const { id: _discard, ...meetingFields } = meetingDoc.data() as Meeting;
+      const meeting = { id: meetingDoc.id, ...meetingFields };
       
       let analysisResult;
       

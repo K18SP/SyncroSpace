@@ -44,8 +44,14 @@ interface FeatureUsageChartProps {
   usersData?: any[];
 }
 
+export interface FeatureData {
+  feature: string;
+  usage: number;
+  fill: string;
+}
+
 export function FeatureUsageChart({ spacesData, usersData }: FeatureUsageChartProps) {
-  const [chartData, setChartData] = useState([]);
+  const [chartData, setChartData] = useState<FeatureData[]>(() => []);
 
   useEffect(() => {
     if (!spacesData || !usersData) return;

@@ -159,7 +159,7 @@ export function CreateSpaceDialog({ children }: { children: React.ReactNode }) {
                 // Create notification for the user
                 await addDoc(collection(db, 'users', invitedUid, 'notifications'), {
                   title: 'Meeting Invitation',
-                  body: `You have been invited to "${values.name}" on ${format(values.date, 'PPP')} at ${values.startTime}`,
+                  body: `You have been invited to "${values.name}" on ${values.date ? format(values.date, 'PPP') : 'unknown date'} at ${values.startTime ?? 'unknown time'}`,
                   link: `/meeting/${meetingRef.id}`,
                   read: false,
                   type: 'meeting_invite',

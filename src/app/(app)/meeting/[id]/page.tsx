@@ -212,7 +212,7 @@ export default function MeetingPage() {
               <div className="pt-4 border-t">
                 <h4 className="text-sm font-medium text-gray-900 mb-3">Attendees</h4>
                 <div className="flex flex-wrap gap-2">
-                  {meetingData.attendees.map((email, index) => (
+                  {meetingData.attendees.map((email: string, index: number) => (
                     <div key={index} className="flex items-center space-x-2">
                       <Avatar className="h-6 w-6">
                         <AvatarFallback className="text-xs">

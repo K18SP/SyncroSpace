@@ -7,7 +7,7 @@ import { doc, collection, query, where } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 
-export default function ConversationPage({ params }: { params: { id: string } }) {
+export default function ConversationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: otherUserId } = React.use(params);
   const [user] = useAuthState(auth);
 

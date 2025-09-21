@@ -86,11 +86,12 @@ export default function ContactsPage() {
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('phoneNumber', 'in', phoneNumbers));
       const querySnapshot = await getDocs(q);
-      const existingUsers = querySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data()}));
+    type ExistingUser = { uid: string; phoneNumber?: string; photoURL?: string };
+    const existingUsers: ExistingUser[] = querySnapshot.docs.map(doc => ({ uid: doc.id, ...(doc.data() as any)}));
       
       const processedContacts: SyncedContact[] = contacts.map((contact: any): SyncedContact => {
         const tel = contact.tel[0];
-        const existingUser = existingUsers.find(u => u.phoneNumber === tel);
+    const existingUser = existingUsers.find((u: ExistingUser) => u.phoneNumber === tel);
         return {
           name: contact.name[0],
           tel,

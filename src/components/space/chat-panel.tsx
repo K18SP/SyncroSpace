@@ -8,8 +8,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Send, ThumbsUp, Paperclip, Check, CheckCheck } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { auth, rtdb } from '@/lib/firebase';
+import { ref as rtdbRef, push, serverTimestamp as rtdbTimestamp, onValue, set } from 'firebase/database';
+import { uploadFile } from '@/lib/firebase-upload';
 import { Skeleton } from '../ui/skeleton';
 import { Separator } from '../ui/separator';
 
@@ -24,6 +25,7 @@ interface ChatPanelProps {
     participants: Participant[];
     spaceName: string;
     spaceId: string;
+    canRead?: boolean; // optional: gate subscription based on membership/permissions
 }
 
 interface Message {
@@ -32,12 +34,14 @@ interface Message {
     name: string;
     avatar?: string;
     message: string;
-    type: 'text' | 'reaction';
+    type: 'text' | 'reaction' | 'image' | 'file';
     timestamp: any;
     readBy?: string[];
+    fileName?: string;
+    fileType?: string;
 }
 
-export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) {
+export function ChatPanel({ participants, spaceName, spaceId, canRead = true }: ChatPanelProps) {
     const [user] = useAuthState(auth);
     const [newMessage, setNewMessage] = useState('');
     const [messages, setMessages] = useState<Message[]>([]);
@@ -45,6 +49,8 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
     const [error, setError] = useState<string | null>(null);
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const [file, setFile] = useState<File | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Real-time listener for messages
     useEffect(() => {
@@ -52,34 +58,31 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
             console.log('No spaceId provided to chat panel');
             return;
         }
-
-        console.log('Setting up chat listener for space:', spaceId);
-        const messagesRef = collection(db, 'spaces', spaceId, 'messages');
-        const q = query(messagesRef, orderBy('timestamp', 'asc'));
-
-        const unsubscribe = onSnapshot(
-            q,
-            (snapshot) => {
-                console.log('Messages snapshot received:', snapshot.docs.length, 'messages');
-                const messagesData = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    timestamp: doc.data().timestamp
-                })) as Message[];
-                
-                setMessages(messagesData);
-                setLoading(false);
-                setError(null);
-            },
-            (err) => {
-                console.error('Error fetching messages:', err);
-                setError(`Failed to load messages: ${err.message}`);
-                setLoading(false);
-            }
-        );
-
+        if (!canRead) {
+            setLoading(false);
+            setError('You do not have access to view messages in this space.');
+            return;
+        }
+        const messagesRef = rtdbRef(rtdb, `spaces/${spaceId}/messages`);
+        const unsubscribe = onValue(messagesRef, (snapshot) => {
+            const val = snapshot.val();
+            const messagesData = val
+                ? Object.entries(val).map(([id, data]) =>
+                    typeof data === 'object' && data !== null
+                        ? { ...(data as Message), id }
+                        : { id, timestamp: 0 }
+                  )
+                : [];
+            messagesData.sort((a, b) => ((a as Message).timestamp || 0) - ((b as Message).timestamp || 0));
+            setMessages(messagesData as Message[]);
+            setLoading(false);
+            setError(null);
+        }, (err) => {
+            setError(`Failed to load messages: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            setLoading(false);
+        });
         return () => unsubscribe();
-    }, [spaceId]);
+    }, [spaceId, canRead]);
 
     // Auto-scroll to bottom when new messages arrive
     useEffect(() => {
@@ -87,49 +90,48 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
     }, [messages]);
 
     // Mark messages as read
-    useEffect(() => {
-        if (!user || messages.length === 0) return;
-
-        const unreadMessages = messages.filter(msg => 
-            msg.uid !== user.uid && 
-            !msg.readBy?.includes(user.uid)
-        );
-
-        if (unreadMessages.length > 0) {
-            const batch = unreadMessages.map(msg => {
-                const messageRef = doc(db, 'spaces', spaceId, 'messages', msg.id);
-                return updateDoc(messageRef, {
-                    readBy: arrayUnion(user.uid)
-                });
-            });
-
-            Promise.all(batch).catch(console.error);
-        }
-    }, [messages, user, spaceId]);
+    // Mark messages as read (optional: implement for RTDB if needed)
+    // useEffect(() => {
+    //     if (!user || messages.length === 0) return;
+    //     // Implement RTDB logic for read receipts if needed
+    // }, [messages, user, spaceId]);
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newMessage.trim() || !user || !spaceId) {
-            console.log('Cannot send message:', { hasMessage: !!newMessage.trim(), hasUser: !!user, hasSpaceId: !!spaceId });
+        if ((!newMessage.trim() && !file) || !user || !spaceId) {
+            console.log('Cannot send message:', { hasMessage: !!newMessage.trim(), hasUser: !!user, hasSpaceId: !!spaceId, hasFile: !!file });
             return;
         }
-
         try {
             const senderName = user.displayName || user.email?.split('@')[0] || 'User';
-            console.log('Sending message:', { senderName, message: newMessage.trim(), spaceId });
-            
-            await addDoc(collection(db, 'spaces', spaceId, 'messages'), {
+            let messageContent = newMessage.trim();
+            let fileUrl = null;
+            let fileType = 'text';
+            if (file) {
+                fileUrl = await uploadFile(file, 'chat');
+                messageContent = fileUrl;
+                if (file.type.startsWith('image/')) {
+                    fileType = 'image';
+                } else {
+                    fileType = 'file';
+                }
+            }
+            const msgRef = rtdbRef(rtdb, `spaces/${spaceId}/messages`);
+            const newMsgRef = push(msgRef);
+            await set(newMsgRef, {
                 uid: user.uid,
                 name: senderName,
                 avatar: user.photoURL || null,
-                message: newMessage.trim(),
-                type: 'text',
-                timestamp: serverTimestamp(),
+                message: messageContent,
+                type: fileType,
+                timestamp: Date.now(),
                 readBy: [user.uid],
+                fileName: file?.name || null,
+                fileType: file?.type || null,
             });
-
-            console.log('Message sent successfully');
             setNewMessage('');
+            setFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = '';
         } catch (err) {
             console.error('Error sending message:', err);
             setError(`Failed to send message: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -138,17 +140,17 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
 
     const handleSendReaction = async () => {
         if (!user || !spaceId) return;
-
         try {
             const senderName = user.displayName || user.email?.split('@')[0] || 'User';
-            
-            await addDoc(collection(db, 'spaces', spaceId, 'messages'), {
+            const msgRef = rtdbRef(rtdb, `spaces/${spaceId}/messages`);
+            const newMsgRef = push(msgRef);
+            await set(newMsgRef, {
                 uid: user.uid,
                 name: senderName,
                 avatar: user.photoURL || null,
                 message: '👍',
                 type: 'reaction',
-                timestamp: serverTimestamp(),
+                timestamp: Date.now(),
                 readBy: [user.uid],
             });
         } catch (err) {
@@ -179,24 +181,7 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
     };
 
     // Check if Firebase is properly configured
-    if (!db) {
-        return (
-            <div className="flex h-full flex-col">
-                <ScrollArea className="flex-1">
-                    <div className="p-4 text-center text-muted-foreground">
-                        <p className="text-sm">Firebase not configured</p>
-                        <p className="text-xs mt-2">Please check your environment variables</p>
-                    </div>
-                </ScrollArea>
-                <div className="border-t bg-muted/50 p-4">
-                    <div className="flex gap-2">
-                        <Input placeholder="Chat unavailable" disabled className="flex-1" />
-                        <Button disabled><Send className="h-4 w-4" /></Button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
+    // RTDB always initialized if Firebase is configured
 
     if (loading) {
         return (
@@ -227,6 +212,11 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
                             {error}
                         </div>
                     )}
+                    {!error && !canRead && (
+                        <div className="text-center text-muted-foreground text-sm p-4">
+                            You don’t have permission to view messages here. Ask an admin to invite you to this space.
+                        </div>
+                    )}
                     
                     {messages.length === 0 && !error && (
                         <div className="text-center text-muted-foreground text-sm p-4">
@@ -252,7 +242,7 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
                                         {msg.name?.charAt(0) || 'U'}
                                     </AvatarFallback>
                                 </Avatar>
-                                
+
                                 <div
                                     className={`max-w-[75%] rounded-lg p-3 text-sm ${
                                         isOwnMessage
@@ -268,11 +258,31 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
                                             </p>
                                         </div>
                                     )}
-                                    
-                                    <p className={`${isReaction ? 'leading-none' : ''}`}>
-                                        {msg.message}
-                                    </p>
-                                    
+
+                                    {/* Render message content based on type */}
+                                    {msg.type === 'image' ? (
+                                        <img
+                                            src={msg.message}
+                                            alt={msg.fileName || 'image'}
+                                            className="max-w-xs max-h-60 rounded shadow"
+                                            style={{ marginBottom: '0.5rem' }}
+                                        />
+                                    ) : msg.type === 'file' ? (
+                                        <a
+                                            href={msg.message}
+                                            download={msg.fileName || true}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 underline break-all"
+                                        >
+                                            {msg.fileName || 'Download file'}
+                                        </a>
+                                    ) : (
+                                        <p className={`${isReaction ? 'leading-none' : ''}`}>
+                                            {msg.message}
+                                        </p>
+                                    )}
+
                                     {isOwnMessage && !isReaction && (
                                         <div className="flex justify-end items-center mt-1">
                                             {getMessageStatus(msg)}
@@ -295,6 +305,27 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
                         className="flex-1"
                         disabled={!user || !spaceId}
                     />
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                            if (e.target.files && e.target.files[0]) {
+                                setFile(e.target.files[0]);
+                            }
+                        }}
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={!user || !spaceId}
+                        className="shrink-0"
+                        title="Attach file"
+                    >
+                        <Paperclip className="h-4 w-4" />
+                    </Button>
                     <Button
                         type="button"
                         variant="ghost"
@@ -307,7 +338,7 @@ export function ChatPanel({ participants, spaceName, spaceId }: ChatPanelProps) 
                     </Button>
                     <Button
                         type="submit"
-                        disabled={!newMessage.trim() || !user || !spaceId}
+                        disabled={(!newMessage.trim() && !file) || !user || !spaceId}
                         className="shrink-0"
                     >
                         <Send className="h-4 w-4" />

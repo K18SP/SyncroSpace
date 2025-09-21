@@ -4,13 +4,7 @@
 import { Line, LineChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { useState, useEffect } from 'react';
 
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
-} from "@/components/ui/chart"
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 
 // Default chart config - will be overridden dynamically
 
@@ -18,9 +12,20 @@ interface TeamActivityChartProps {
   spacesData?: any[];
 }
 
+export interface TeamActivityDay {
+  date: string;
+  [spaceKey: string]: string | number;
+}
+export interface TeamChartConfig {
+  [spaceKey: string]: {
+    label: string;
+    color: string;
+  };
+}
+
 export function TeamActivityChart({ spacesData }: TeamActivityChartProps) {
-  const [chartData, setChartData] = useState([]);
-  const [chartConfig, setChartConfig] = useState({
+  const [chartData, setChartData] = useState<TeamActivityDay[]>(() => []);
+  const [chartConfig, setChartConfig] = useState<TeamChartConfig>(() => ({
     general: {
       label: "#general",
       color: "hsl(var(--primary))",
@@ -33,7 +38,7 @@ export function TeamActivityChart({ spacesData }: TeamActivityChartProps) {
       label: "#random",
       color: "hsl(var(--muted-foreground))",
     },
-  });
+  }));
 
   useEffect(() => {
     if (!spacesData || spacesData.length === 0) {
@@ -69,7 +74,7 @@ export function TeamActivityChart({ spacesData }: TeamActivityChartProps) {
     }
     
     // Create dynamic chart config based on actual spaces
-    const dynamicConfig = {};
+  const dynamicConfig: TeamChartConfig = {};
     spaceNames.forEach((spaceKey, index) => {
       const colors = [
         "hsl(var(--primary))",
@@ -89,7 +94,7 @@ export function TeamActivityChart({ spacesData }: TeamActivityChartProps) {
       const dateStr = date.toISOString().split('T')[0];
       
       // Generate activity data based on actual spaces
-      const dayData = { date: dateStr };
+      const dayData: TeamActivityDay = { date: dateStr };
       
       spaceNames.forEach((spaceKey, index) => {
         // Generate realistic activity with some variation

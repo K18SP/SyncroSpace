@@ -109,6 +109,8 @@ export function LoginForm() {
       handleError(error);
     } finally {
       setIsLoading(false);
+      // Clear password from memory/state after handling
+      form.setValue('password', '');
     }
   }
 
@@ -202,6 +204,7 @@ export function LoginForm() {
                   <Input
                     type="password"
                     placeholder="••••••••"
+                    autoComplete="current-password"
                     {...field}
                     disabled={isLoading || !!isSocialLoading}
                   />

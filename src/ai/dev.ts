@@ -2,13 +2,13 @@
 import { config } from 'dotenv';
 config();
 
-import '@/ai/flows/suggest-channel.ts';
-import '@/ai/flows/generate-avatar.ts';
-import '@/ai/flows/summarize-meeting.ts';
-import '@/ai/flows/chatbot.ts';
-import '@/ai/flows/contact.ts';
+import '@/ai/flows/suggest-channel';
+import '@/ai/flows/generate-avatar';
+import '@/ai/flows/summarize-meeting';
+import '@/ai/flows/chatbot';
+import '@/ai/flows/contact';
 
-import { generateAvatar } from '@/ai/flows/generate-avatar.ts';
+import { generateAvatar } from '@/ai/flows/generate-avatar';
 
 async function testGenerateAvatar() {
     console.log('Testing generateAvatar flow...');

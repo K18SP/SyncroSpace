@@ -30,7 +30,7 @@ async function testPersonalizedContent() {
       console.log('✅ Personalized content generated successfully');
       console.log('Content:', result.data[0]?.generated_content || 'Generated content');
     } else {
-      console.log('❌ Failed to generate personalized content:', result.error);
+      console.log('❌ Failed to generate personalized content');
     }
   } catch (error) {
     console.error('❌ Error testing personalized content:', error);
@@ -71,7 +71,7 @@ async function testExecutiveInsights() {
       console.log('✅ Executive insights generated successfully');
       console.log('Insights:', result.data[0]?.executive_summary || 'Generated insights');
     } else {
-      console.log('❌ Failed to generate executive insights:', result.error);
+      console.log('❌ Failed to generate executive insights');
     }
   } catch (error) {
     console.error('❌ Error testing executive insights:', error);
@@ -102,7 +102,7 @@ async function testUserForecast() {
       console.log('✅ User engagement forecast generated successfully');
       console.log('Forecast:', result.data[0]?.engagement_forecast || 'Generated forecast');
     } else {
-      console.log('❌ Failed to generate user forecast:', result.error);
+      console.log('❌ Failed to generate user forecast');
     }
   } catch (error) {
     console.error('❌ Error testing user forecast:', error);
@@ -125,7 +125,7 @@ async function testMeetingAnalytics() {
       console.log('✅ Meeting effectiveness scored successfully');
       console.log('Score:', effectivenessResult.data[0]?.effectiveness_score || 'Generated score');
     } else {
-      console.log('❌ Failed to score meeting effectiveness:', effectivenessResult.error);
+      console.log('❌ Failed to score meeting effectiveness');
     }
 
     // Test meeting categorization
@@ -140,7 +140,7 @@ async function testMeetingAnalytics() {
       console.log('✅ Meeting categorization completed successfully');
       console.log('Categorization:', categorizationResult.data[0] || 'Generated categorization');
     } else {
-      console.log('❌ Failed to categorize meeting:', categorizationResult.error);
+      console.log('❌ Failed to categorize meeting');
     }
   } catch (error) {
     console.error('❌ Error testing meeting analytics:', error);
@@ -164,7 +164,7 @@ async function testSpaceRecommendations() {
       console.log('✅ Space recommendations generated successfully');
       console.log('Recommendations:', result.data[0]?.space_recommendations || 'Generated recommendations');
     } else {
-      console.log('❌ Failed to generate space recommendations:', result.error);
+      console.log('❌ Failed to generate space recommendations');
     }
   } catch (error) {
     console.error('❌ Error testing space recommendations:', error);
@@ -185,9 +185,9 @@ async function testBasicQuery() {
     
     if (result.success) {
       console.log('✅ Basic BigQuery connection successful');
-      console.log('Test result:', result.data[0]);
+      console.log('Test result:', result.data?.[0] ?? {});
     } else {
-      console.log('❌ Basic BigQuery connection failed:', result.error);
+      console.log('❌ Basic BigQuery connection failed');
     }
   } catch (error) {
     console.error('❌ Error testing basic query:', error);

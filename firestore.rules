@@ -49,8 +49,9 @@ service cloud.firestore {
       allow create, delete: if isAdmin() || isDevelopment();
       
       match /messages/{messageId} {
-        allow read, write: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/spaces/$(spaceId)).data.members;
+        allow read, write: if isDevelopment() || (
+          isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/spaces/$(spaceId)).data.members
+        );
       }
     }
     

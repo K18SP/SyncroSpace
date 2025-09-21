@@ -12,6 +12,8 @@ export interface MeetingData {
   creatorId: string;
   creatorName: string;
   status: string;
+  remindersSent?: boolean;
+  spaceId?: string;
 }
 
 // Check for meetings that need 10-minute reminders

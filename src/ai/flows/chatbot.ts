@@ -42,27 +42,27 @@ const chatFlow = ai.defineFlow(
     outputSchema: ChatOutputSchema,
   },
   async ({history, message, role}) => {
-    // Map the incoming history to the format expected by the model
-    const modelHistory = history.map(msg => ({
-        role: msg.role,
-        parts: [{ text: msg.content }],
-    }));
+    // Build a single prompt including brief context and recent history.
+    const context = `You are a helpful and friendly AI assistant for a company called SyncroSpace.
+Your goal is to answer user questions about the product and encourage them to sign up.
+The user role is: ${role || 'user'}.
 
-    const {output} = await ai.generate({
-        system: `You are a helpful and friendly AI assistant for a company called SyncroSpace.
-      Your goal is to answer user questions about the product and encourage them to sign up.
-      The user you are talking to has the role: ${role || 'user'}. Tailor your answers accordingly.
+Here is some information about SyncroSpace:
+- Product: A virtual collaboration platform for remote teams.
+- Key Features: Customizable virtual spaces, proximity-based video/audio chat, integrated Kanban boards, team calendars with Google Calendar sync, secure channels for external partners (SyncroSpace Connect), AI-powered meeting summaries, and an AI assistant for suggestions.
+- Mission: To make remote work as collaborative and human as a physical office.
+- Pricing: Free tier; Pro $15/user/month; Enterprise custom.
 
-      Here is some information about SyncroSpace:
-      - Product: A virtual collaboration platform for remote teams.
-      - Key Features: Customizable virtual spaces, proximity-based video/audio chat, integrated Kanban boards, team calendars with Google Calendar sync, secure channels for external partners (SyncroSpace Connect), AI-powered meeting summaries, and an AI assistant for suggestions.
-      - Mission: To make remote work as collaborative and human as a physical office.
-      - Pricing: There is a Free tier for small teams, a Pro plan for $15/user/month, and a custom Enterprise plan.
-      
-      Keep your answers concise and helpful. Always be positive and encouraging.`,
-        history: modelHistory,
-        prompt: message,
-    });
-    return {message: output!};
+Keep answers concise, positive, and helpful.`;
+
+    const historyText = history
+      .slice(-6) // keep it short
+      .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)
+      .join('\n');
+
+    const prompt = `${context}\n\nConversation so far:\n${historyText}\n\nUser: ${message}\nAssistant:`;
+
+    const { output } = await ai.generate(prompt);
+    return { message: output ?? '' };
   }
 );

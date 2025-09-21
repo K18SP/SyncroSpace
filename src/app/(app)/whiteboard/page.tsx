@@ -20,9 +20,7 @@ interface ExcalidrawScene {
 
 // More specific dynamic import with better error handling
 const ExcalidrawWrapper = dynamic(
-  () => import('@/components/whiteboard/excalidraw-wrapper').then(mod => ({ 
-    default: mod.ExcalidrawWrapper 
-  })),
+  () => import('@/components/whiteboard/excalidraw-wrapper').then(mod => ({ default: mod.ExcalidrawWrapper })),
   {
     ssr: false,
     loading: () => (
@@ -33,23 +31,7 @@ const ExcalidrawWrapper = dynamic(
           <Skeleton className="h-8 w-48 bg-gray-200" />
         </div>
       </div>
-    ),
-    onError: (error) => {
-      console.error('Failed to load Excalidraw:', error);
-      return (
-        <div className="flex h-full w-full items-center justify-center bg-red-50">
-          <div className="text-center">
-            <p className="text-red-600">Failed to load whiteboard</p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      );
-    }
+    )
   }
 );
 

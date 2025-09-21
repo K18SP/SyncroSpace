@@ -269,7 +269,7 @@ export default function CalendarPage() {
                                             {event.attendees.length > 0 && (
                                                 <div className="flex items-center gap-2 pt-2">
                                                     <div className="flex -space-x-2 overflow-hidden">
-                                                        {event.attendees.map((attendee, i) => (
+                                                        {event.attendees.map((attendee: string, i: number) => (
                                                             <Avatar key={i} className="inline-block border-2 border-background h-8 w-8">
                                                                 <AvatarImage src={attendee} />
                                                                 <AvatarFallback>{getInitials('User')}</AvatarFallback>
